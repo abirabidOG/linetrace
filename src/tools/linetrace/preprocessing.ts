@@ -2,7 +2,8 @@ import type { PreprocessingOptions } from './types';
 
 /**
  * Calculates optimal binary threshold using Otsu's method.
- * Maximizes inter-class variance of the luminance histogram.
+ * Accurately treats transparent pixels (alpha < 16) as background white (255)
+ * and selects the central midpoint of any flat maximal-variance plateau.
  */
 export function calculateOtsuThreshold(imageData: ImageData): number {
   const { data } = imageData;
@@ -10,8 +11,12 @@ export function calculateOtsuThreshold(imageData: ImageData): number {
   const total = data.length / 4;
 
   for (let i = 0; i < data.length; i += 4) {
-    // Standard perceptual luminance
-    const lum = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+    const a = data[i + 3];
+    // Transparent pixels are canvas background -> treat as white (255)
+    const lum =
+      a < 16
+        ? 255
+        : Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
     histogram[lum]++;
   }
 
@@ -24,7 +29,7 @@ export function calculateOtsuThreshold(imageData: ImageData): number {
   let wB = 0;
   let wF = 0;
   let maxVariance = 0;
-  let threshold = 128;
+  let bestTList: number[] = [];
 
   for (let t = 0; t < 256; t++) {
     wB += histogram[t];
@@ -37,14 +42,22 @@ export function calculateOtsuThreshold(imageData: ImageData): number {
     const mF = (sum - sumB) / wF;
 
     const varianceBetween = wB * wF * (mB - mF) * (mB - mF);
-    if (varianceBetween > maxVariance) {
+    if (varianceBetween > maxVariance + 1e-5) {
       maxVariance = varianceBetween;
-      threshold = t;
+      bestTList = [t];
+    } else if (Math.abs(varianceBetween - maxVariance) <= 1e-5) {
+      bestTList.push(t);
     }
   }
 
+  let threshold = 128;
+  if (bestTList.length > 0) {
+    // Choose the central midpoint of the maximum variance plateau
+    threshold = Math.round((bestTList[0] + bestTList[bestTList.length - 1]) / 2);
+  }
+
   // Safety bounds for line art
-  return Math.min(240, Math.max(15, threshold));
+  return Math.min(240, Math.max(30, threshold));
 }
 
 /**
@@ -54,14 +67,14 @@ function applyDespeckle(
   data: Uint8ClampedArray,
   width: number,
   height: number,
-  threshold: number
+  _threshold: number
 ): void {
   const copy = new Uint8ClampedArray(data);
 
   for (let y = 1; y < height - 1; y++) {
     for (let x = 1; x < width - 1; x++) {
       const idx = (y * width + x) * 4;
-      const isDark = copy[idx] < threshold;
+      const isDark = copy[idx] < 128;
 
       // Only check dark pixels to clean noise specks
       if (isDark) {
@@ -70,14 +83,14 @@ function applyDespeckle(
           for (let dx = -1; dx <= 1; dx++) {
             if (dx === 0 && dy === 0) continue;
             const nIdx = ((y + dy) * width + (x + dx)) * 4;
-            if (copy[nIdx] < threshold) {
+            if (copy[nIdx] < 128) {
               darkNeighbors++;
             }
           }
         }
 
-        // If isolated with 0 or 1 neighbor, turn it to white background
-        if (darkNeighbors <= 1) {
+        // Only remove completely isolated single-pixel noise (0 neighbors), keeping line endpoints intact
+        if (darkNeighbors === 0) {
           data[idx] = 255;
           data[idx + 1] = 255;
           data[idx + 2] = 255;

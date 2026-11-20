@@ -245,6 +245,10 @@ export const LineTraceTool: React.FC = () => {
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error('Canvas context unavailable');
 
+      // Pre-fill white canvas background so transparent icons and line art
+      // blend cleanly with white paper without dark transparent edges
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0);
 
       const result = await executeTracePipeline(
@@ -358,20 +362,57 @@ export const LineTraceTool: React.FC = () => {
     showToast('Batch vectorization complete!');
   };
 
-  // Before/after split slider drag handlers
-  const handleSliderMouseDown = () => {
+  // Before/after split slider drag handlers using window listeners
+  const handleSliderMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
     isDraggingSliderRef.current = true;
   };
-  const handleSliderMouseMove = (e: React.MouseEvent) => {
-    if (!isDraggingSliderRef.current || !sliderContainerRef.current) return;
-    const rect = sliderContainerRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const pct = Math.max(0, Math.min(100, (x / rect.width) * 100));
-    setSliderPosition(pct);
+
+  const handleSliderTouchStart = () => {
+    isDraggingSliderRef.current = true;
   };
-  const handleSliderMouseUp = () => {
-    isDraggingSliderRef.current = false;
-  };
+
+  useEffect(() => {
+    const handleMove = (clientX: number) => {
+      if (!isDraggingSliderRef.current || !sliderContainerRef.current) return;
+      const rect = sliderContainerRef.current.getBoundingClientRect();
+      const x = clientX - rect.left;
+      const pct = Math.max(0, Math.min(100, (x / rect.width) * 100));
+      setSliderPosition(pct);
+    };
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (isDraggingSliderRef.current) {
+        handleMove(e.clientX);
+      }
+    };
+
+    const onMouseUp = () => {
+      isDraggingSliderRef.current = false;
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (isDraggingSliderRef.current && e.touches[0]) {
+        handleMove(e.touches[0].clientX);
+      }
+    };
+
+    const onTouchEnd = () => {
+      isDraggingSliderRef.current = false;
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    window.addEventListener('touchmove', onTouchMove, { passive: true });
+    window.addEventListener('touchend', onTouchEnd);
+
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+      window.removeEventListener('touchmove', onTouchMove);
+      window.removeEventListener('touchend', onTouchEnd);
+    };
+  }, []);
 
   // Keyboard navigation & slider
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -1030,10 +1071,7 @@ export const LineTraceTool: React.FC = () => {
 
                 {/* Image Stage Viewport */}
                 <div
-                  ref={sliderContainerRef}
-                  onMouseMove={handleSliderMouseMove}
-                  onMouseUp={handleSliderMouseUp}
-                  className={`relative w-full aspect-square max-h-[460px] rounded-2xl overflow-hidden border border-[#E5E1D6] flex items-center justify-center select-none ${
+                  className={`relative w-full min-h-[380px] sm:min-h-[460px] max-h-[480px] rounded-2xl overflow-hidden border border-[#E5E1D6] flex items-center justify-center p-4 sm:p-6 select-none ${
                     traceOptions.background === 'white'
                       ? 'bg-white'
                       : traceOptions.background === 'dark'
@@ -1043,94 +1081,113 @@ export const LineTraceTool: React.FC = () => {
                 >
                   {/* Canvas Render Area scaled by zoom */}
                   <div
-                    className="relative w-full h-full flex items-center justify-center transition-transform duration-150"
+                    className="relative max-w-full max-h-full flex items-center justify-center transition-transform duration-150"
                     style={{ transform: `scale(${zoomLevel})` }}
                   >
-                    {/* 1. Tab: Vector only */}
-                    {activeTab === 'vector' && activeItem?.svgOutput && (
+                    {activeItem && (
                       <div
-                        className="w-full h-full p-4 flex items-center justify-center"
-                        dangerouslySetInnerHTML={{ __html: activeItem.svgOutput }}
-                      />
-                    )}
-
-                    {/* 2. Tab: Original only */}
-                    {activeTab === 'original' && activeItem && (
-                      <img
-                        src={activeItem.originalUrl}
-                        alt="Original source"
-                        className="w-full h-full object-contain p-4"
-                      />
-                    )}
-
-                    {/* 3. Tab: Overlay (Vector outline over original with low opacity) */}
-                    {activeTab === 'overlay' && activeItem && (
-                      <div className="relative w-full h-full p-4 flex items-center justify-center">
-                        <img
-                          src={activeItem.originalUrl}
-                          alt="Original base"
-                          className="absolute inset-0 w-full h-full object-contain p-4 opacity-50"
-                        />
-                        {activeItem.svgOutput && (
-                          <div
-                            className="absolute inset-0 w-full h-full p-4 flex items-center justify-center"
-                            dangerouslySetInnerHTML={{ __html: activeItem.svgOutput }}
-                          />
-                        )}
-                      </div>
-                    )}
-
-                    {/* 4. Tab: Diff (Visual discrepancy inspection) */}
-                    {activeTab === 'diff' && activeItem?.preprocessedDataUrl && (
-                      <div className="relative w-full h-full p-4 flex items-center justify-center">
-                        <img
-                          src={activeItem.preprocessedDataUrl}
-                          alt="Preprocessed bitmap"
-                          className="absolute inset-0 w-full h-full object-contain p-4 mix-blend-multiply opacity-60"
-                        />
-                        {activeItem.svgOutput && (
-                          <div
-                            className="absolute inset-0 w-full h-full p-4 flex items-center justify-center mix-blend-difference"
-                            dangerouslySetInnerHTML={{ __html: activeItem.svgOutput }}
-                          />
-                        )}
-                      </div>
-                    )}
-
-                    {/* Before/After Split Slider on Vector Tab */}
-                    {activeTab === 'vector' && activeItem?.svgOutput && (
-                      <div
-                        tabIndex={0}
-                        role="slider"
-                        aria-label="Before and after comparison slider"
-                        aria-valuenow={Math.round(sliderPosition)}
-                        aria-valuemin={0}
-                        aria-valuemax={100}
-                        onKeyDown={handleKeyDown}
-                        className="absolute inset-0 pointer-events-none"
+                        ref={sliderContainerRef}
+                        className="relative select-none shadow-xs"
+                        style={{
+                          aspectRatio: `${activeItem.width} / ${activeItem.height}`,
+                          maxWidth: '100%',
+                          maxHeight: '430px',
+                          width: activeItem.width >= activeItem.height ? '430px' : 'auto',
+                          height: activeItem.height > activeItem.width ? '430px' : 'auto',
+                        }}
                       >
-                        {/* Left half: Original clipped */}
-                        <div
-                          className="absolute inset-0 pointer-events-none"
-                          style={{ clipPath: `inset(0 ${100 - sliderPosition}% 0 0)` }}
-                        >
+                        {/* 1. Tab: Vector only (with Before/After Split Scrub Slider) */}
+                        {activeTab === 'vector' && activeItem.svgOutput && (
+                          <>
+                            {/* Vector SVG (Bottom) */}
+                            <div
+                              className="absolute inset-0 w-full h-full [&>svg]:w-full [&>svg]:h-full [&>svg]:block pointer-events-none"
+                              dangerouslySetInnerHTML={{ __html: activeItem.svgOutput }}
+                            />
+
+                            {/* Original Image (Top, clipped by slider from left) */}
+                            <div
+                              className="absolute inset-0 w-full h-full pointer-events-none overflow-hidden"
+                              style={{ clipPath: `inset(0 ${100 - sliderPosition}% 0 0)` }}
+                            >
+                              <img
+                                src={activeItem.originalUrl}
+                                alt="Original comparison side"
+                                className="w-full h-full block object-fill"
+                              />
+                            </div>
+
+                            {/* Interactive Scrub Line & Handle */}
+                            <div
+                              tabIndex={0}
+                              role="slider"
+                              aria-label="Before and after comparison slider"
+                              aria-valuenow={Math.round(sliderPosition)}
+                              aria-valuemin={0}
+                              aria-valuemax={100}
+                              onKeyDown={handleKeyDown}
+                              onMouseDown={handleSliderMouseDown}
+                              onTouchStart={handleSliderTouchStart}
+                              className="pointer-events-auto absolute inset-y-0 w-1 bg-[#5846F6] cursor-ew-resize shadow-md z-20 focus:outline-none focus:ring-2 focus:ring-[#5846F6]"
+                              style={{ left: `${sliderPosition}%` }}
+                            >
+                              <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 flex h-8 w-8 items-center justify-center rounded-full bg-white border border-[#E5E1D6] shadow-lg text-[#5846F6] text-xs font-bold hover:scale-110 active:scale-95 transition-transform">
+                                ⇄
+                              </div>
+                            </div>
+
+                            {/* Floating Labels */}
+                            <div className="absolute top-2.5 left-2.5 pointer-events-none z-10 px-2 py-0.5 rounded bg-black/75 text-white font-mono text-[9px] uppercase font-bold tracking-wider shadow-xs">
+                              Original
+                            </div>
+                            <div className="absolute top-2.5 right-2.5 pointer-events-none z-10 px-2 py-0.5 rounded bg-[#5846F6]/90 text-white font-mono text-[9px] uppercase font-bold tracking-wider shadow-xs">
+                              Vector
+                            </div>
+                          </>
+                        )}
+
+                        {/* 2. Tab: Original only */}
+                        {activeTab === 'original' && (
                           <img
                             src={activeItem.originalUrl}
-                            alt="Original side"
-                            className="w-full h-full object-contain p-4"
+                            alt="Original source"
+                            className="w-full h-full block object-fill"
                           />
-                        </div>
+                        )}
 
-                        {/* Interactive Scrub Line & Handle */}
-                        <div
-                          onMouseDown={handleSliderMouseDown}
-                          className="pointer-events-auto absolute inset-y-0 w-1 bg-[#5846F6] cursor-ew-resize shadow-md"
-                          style={{ left: `${sliderPosition}%` }}
-                        >
-                          <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 flex h-8 w-8 items-center justify-center rounded-full bg-white border border-[#E5E1D6] shadow-md text-[#5846F6] text-xs font-bold">
-                            ⇄
-                          </div>
-                        </div>
+                        {/* 3. Tab: Overlay (Vector outline over original with low opacity) */}
+                        {activeTab === 'overlay' && (
+                          <>
+                            <img
+                              src={activeItem.originalUrl}
+                              alt="Original base"
+                              className="absolute inset-0 w-full h-full block object-fill opacity-45"
+                            />
+                            {activeItem.svgOutput && (
+                              <div
+                                className="absolute inset-0 w-full h-full [&>svg]:w-full [&>svg]:h-full [&>svg]:block pointer-events-none"
+                                dangerouslySetInnerHTML={{ __html: activeItem.svgOutput }}
+                              />
+                            )}
+                          </>
+                        )}
+
+                        {/* 4. Tab: Diff (Visual discrepancy inspection) */}
+                        {activeTab === 'diff' && activeItem.preprocessedDataUrl && (
+                          <>
+                            <img
+                              src={activeItem.preprocessedDataUrl}
+                              alt="Preprocessed bitmap"
+                              className="absolute inset-0 w-full h-full block object-fill mix-blend-multiply opacity-60"
+                            />
+                            {activeItem.svgOutput && (
+                              <div
+                                className="absolute inset-0 w-full h-full [&>svg]:w-full [&>svg]:h-full [&>svg]:block mix-blend-difference pointer-events-none"
+                                dangerouslySetInnerHTML={{ __html: activeItem.svgOutput }}
+                              />
+                            )}
+                          </>
+                        )}
                       </div>
                     )}
                   </div>

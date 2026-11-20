@@ -11,7 +11,6 @@ export const SAMPLE_ICONS: SampleItem[] = [
     name: 'Camera Icon',
     filename: 'icon-camera.svg',
     svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
-      <rect width="128" height="128" fill="#FFFFFF"/>
       <path d="M24 40 L40 40 L48 28 L80 28 L88 40 L104 40 C110 40 114 44 114 50 L114 96 C114 102 110 106 104 106 L24 106 C18 106 14 102 14 96 L14 50 C14 44 18 40 24 40 Z" fill="none" stroke="#111111" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
       <circle cx="64" cy="73" r="22" fill="none" stroke="#111111" stroke-width="6"/>
       <circle cx="94" cy="50" r="4" fill="#111111"/>
@@ -22,7 +21,6 @@ export const SAMPLE_ICONS: SampleItem[] = [
     name: 'Shield Icon',
     filename: 'icon-shield.svg',
     svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
-      <rect width="128" height="128" fill="#FFFFFF"/>
       <path d="M64 20 L100 34 C100 74 64 104 64 108 C64 104 28 74 28 34 Z" fill="none" stroke="#111111" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
       <path d="M48 64 L58 74 L80 50" fill="none" stroke="#111111" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
     </svg>`,
@@ -32,7 +30,6 @@ export const SAMPLE_ICONS: SampleItem[] = [
     name: 'Compass Icon',
     filename: 'icon-compass.svg',
     svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
-      <rect width="128" height="128" fill="#FFFFFF"/>
       <circle cx="64" cy="64" r="44" fill="none" stroke="#111111" stroke-width="6"/>
       <polygon points="78,48 50,60 48,78 76,66" fill="none" stroke="#111111" stroke-width="5" stroke-linejoin="round"/>
       <circle cx="64" cy="64" r="3" fill="#111111"/>
@@ -43,7 +40,6 @@ export const SAMPLE_ICONS: SampleItem[] = [
     name: 'Heart Icon',
     filename: 'icon-heart.svg',
     svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
-      <rect width="128" height="128" fill="#FFFFFF"/>
       <path d="M64 98 C64 98 22 72 22 46 C22 32 34 22 46 22 C55 22 61 28 64 33 C67 28 73 22 82 22 C94 22 106 32 106 46 C106 72 64 98 64 98 Z" fill="none" stroke="#111111" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
     </svg>`,
   },
@@ -52,7 +48,6 @@ export const SAMPLE_ICONS: SampleItem[] = [
     name: 'Bookmark Icon',
     filename: 'icon-bookmark.svg',
     svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
-      <rect width="128" height="128" fill="#FFFFFF"/>
       <path d="M36 22 L92 22 C96 22 98 25 98 28 L98 106 L64 86 L30 106 L30 28 C30 25 32 22 36 22 Z" fill="none" stroke="#111111" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
     </svg>`,
   },
@@ -61,7 +56,6 @@ export const SAMPLE_ICONS: SampleItem[] = [
     name: 'Lightning Icon',
     filename: 'icon-lightning.svg',
     svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
-      <rect width="128" height="128" fill="#FFFFFF"/>
       <polygon points="68,16 34,70 62,70 58,112 94,56 66,56" fill="none" stroke="#111111" stroke-width="6" stroke-linejoin="round" stroke-linecap="round"/>
     </svg>`,
   },
@@ -72,7 +66,6 @@ export const SAMPLE_LOGO: SampleItem = {
   name: 'Geometric Monogram Logo',
   filename: 'sample-logo-monogram.svg',
   svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-    <rect width="256" height="256" fill="#FFFFFF"/>
     <g transform="translate(128,128)">
       <polygon points="0,-90 78,-45 78,45 0,90 -78,45 -78,-45" fill="none" stroke="#111111" stroke-width="10" stroke-linejoin="round"/>
       <polygon points="0,-54 47,-27 47,27 0,54 -47,27 -47,-27" fill="none" stroke="#111111" stroke-width="8" stroke-linejoin="round"/>

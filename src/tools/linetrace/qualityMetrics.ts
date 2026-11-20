@@ -41,9 +41,11 @@ export async function computeQualityMetrics(
 
   if (typeof document !== 'undefined') {
     try {
+      const targetW = preprocessedImageData.width || width;
+      const targetH = preprocessedImageData.height || height;
       const offscreenCanvas = document.createElement('canvas');
-      offscreenCanvas.width = width;
-      offscreenCanvas.height = height;
+      offscreenCanvas.width = targetW;
+      offscreenCanvas.height = targetH;
       const offCtx = offscreenCanvas.getContext('2d', { willReadFrequently: true });
 
       if (offCtx) {
@@ -59,10 +61,10 @@ export async function computeQualityMetrics(
           img.src = url;
         });
 
-        offCtx.drawImage(img, 0, 0, width, height);
+        offCtx.drawImage(img, 0, 0, targetW, targetH);
         URL.revokeObjectURL(url);
 
-        const svgImageData = offCtx.getImageData(0, 0, width, height);
+        const svgImageData = offCtx.getImageData(0, 0, targetW, targetH);
         const svgData = svgImageData.data;
         const srcData = preprocessedImageData.data;
 

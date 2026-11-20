@@ -17,7 +17,7 @@ export const PRESET_CONFIGS: Record<Exclude<PresetType, 'custom'>, PresetConfig>
     invert: false,
     grayscale: true,
     quality: 'standard',
-    pathOptimization: 0.7, // High smoothing, clean curves, fewer nodes
+    pathOptimization: 0.55, // Clean, rounded curves, balanced nodes
     colorMode: 'mono',
     posterizeColors: 4,
   },
@@ -28,7 +28,7 @@ export const PRESET_CONFIGS: Record<Exclude<PresetType, 'custom'>, PresetConfig>
     invert: false,
     grayscale: true,
     quality: 'precise',
-    pathOptimization: 0.3, // Low smoothing, keeps fine crisp detail
+    pathOptimization: 0.25, // High fidelity, keeps fine crisp geometric lines and curves
     colorMode: 'mono',
     posterizeColors: 4,
   },
@@ -39,18 +39,18 @@ export const PRESET_CONFIGS: Record<Exclude<PresetType, 'custom'>, PresetConfig>
     invert: false,
     grayscale: true,
     quality: 'standard',
-    pathOptimization: 0.5, // Balanced tolerance for hand-drawn strokes
+    pathOptimization: 0.45, // Balanced tolerance for hand-drawn pencil/ink strokes
     colorMode: 'mono',
     posterizeColors: 4,
   },
   signature: {
-    threshold: 100,
+    threshold: 110,
     autoThreshold: false,
     despeckle: false,
     invert: false,
     grayscale: true,
     quality: 'precise',
-    pathOptimization: 0.2, // Low threshold, keeps delicate thin loops & strokes
+    pathOptimization: 0.15, // Keeps thin hair-lines and delicate signature loops
     colorMode: 'mono',
     posterizeColors: 4,
   },
@@ -73,10 +73,11 @@ export interface TraceResult {
 
 /**
  * Normalizes and post-processes raw ImageTracer SVG output:
- * - Strips unwanted descriptions and comments
- * - Handles Mono color mapping and background transparency
+ * - Strips unwanted descriptions, comments, and fractional opacity jitter
+ * - Ensures scalable viewBox="0 0 w h" and responsive width="100%" height="100%"
+ * - In Mono mode: strips near-white background path (RGB >= 235) and recolors ink paths
  * - Applies stroke harmonization if toggled
- * - Rounds coordinates and ensures scalable viewBox
+ * - Injects background if requested (white or dark)
  */
 export function cleanTracedSvg(
   rawSvg: string,
@@ -90,40 +91,45 @@ export function cleanTracedSvg(
   cleaned = cleaned.replace(/<!--[\s\S]*?-->/g, '');
   cleaned = cleaned.replace(/desc="[^"]*"/g, '');
 
-  // Ensure standard SVG headers and responsive viewBox
-  if (!cleaned.includes('viewBox')) {
-    cleaned = cleaned.replace(
-      /<svg/i,
-      `<svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg"`
-    );
-  }
+  // Standardize root SVG element: responsive 100% sizing and clean viewBox
+  cleaned = cleaned.replace(
+    /<svg[^>]*>/i,
+    `<svg viewBox="0 0 ${width} ${height}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">`
+  );
+
+  const strokeHex = options.strokeColor || '#111111';
 
   // Mono Mode Line Art Extraction
   if (options.colorMode === 'mono') {
-    // In Mono mode, ImageTracer creates a white background path and black stroke paths.
-    // We isolate and remove any background bounding path (fill="rgb(255,255,255)")
+    // In Mono mode, remove light background paths (RGB >= 235)
     cleaned = cleaned.replace(
-      /<path\s+fill="rgb\(255,\s*255,\s*255\)"[^>]*\/>/gi,
-      ''
+      /<path\b[^>]*\bfill="rgb\((\d+),\s*(\d+),\s*(\d+)\)"[^>]*\/>/gi,
+      (match, r, g, b) => {
+        if (+r >= 235 && +g >= 235 && +b >= 235) {
+          return ''; // Strip white/near-white background path
+        }
+        // Normalize black/dark strokes with chosen ink color
+        let p = match;
+        p = p.replace(/fill="[^"]*"/, `fill="${strokeHex}"`);
+        if (options.harmonizeStroke) {
+          const targetWidth = Math.max(0.5, options.targetStrokeWidth || 2);
+          p = p.replace(/stroke="[^"]*"/, `stroke="${strokeHex}"`);
+          p = p.replace(/stroke-width="[^"]*"/, `stroke-width="${targetWidth}"`);
+          if (!p.includes('stroke-linecap')) {
+            p = p.replace(/>$/, ' stroke-linecap="round" stroke-linejoin="round"/>');
+          }
+        } else {
+          p = p.replace(/stroke="[^"]*"/, `stroke="${strokeHex}"`);
+          p = p.replace(
+            /stroke-width="[^"]*"/,
+            `stroke-width="0.3" stroke-linejoin="round" stroke-linecap="round"`
+          );
+        }
+        // Clean fractional opacity jitter like opacity="0.996078431372549"
+        p = p.replace(/\s*opacity="0\.99\d+"/g, '');
+        return p;
+      }
     );
-
-    // Apply user selected ink color to remaining paths
-    const strokeHex = options.strokeColor || '#111111';
-
-    if (options.harmonizeStroke) {
-      // Stroke harmonization mode: render with uniform stroke width
-      const targetWidth = Math.max(0.5, options.targetStrokeWidth || 2);
-      cleaned = cleaned.replace(
-        /<path\s+fill="rgb\([^"]+\)"\s+stroke="rgb\([^"]+\)"\s+stroke-width="[^"]*"/gi,
-        `<path fill="${strokeHex}" stroke="${strokeHex}" stroke-width="${targetWidth}" stroke-linecap="round" stroke-linejoin="round"`
-      );
-    } else {
-      // Standard vector fill with smooth edge stroke
-      cleaned = cleaned.replace(
-        /<path\s+fill="rgb\([^"]+\)"\s+stroke="rgb\([^"]+\)"/gi,
-        `<path fill="${strokeHex}" stroke="${strokeHex}"`
-      );
-    }
   }
 
   // Inject user background if not transparent
@@ -144,11 +150,11 @@ export function cleanTracedSvg(
 
 /**
  * Runs the complete client-side tracing pipeline:
- * 1. Image Analysis (load canvas and compute effective threshold)
- * 2. Preprocessing (grayscale, invert, threshold, despeckle)
- * 3. Path Tracing (ImageTracerJS contour generation)
- * 4. Curve Optimization (bezier spline fitting)
- * 5. Output Generation (SVG serialization & real IoU metrics)
+ * 1. Image Analysis (compute effective threshold & preview)
+ * 2. High-Resolution Subpixel Supersampling (for small icons/images)
+ * 3. Preprocessing (grayscale, invert, threshold, despeckle)
+ * 4. Path Tracing (ImageTracerJS contour generation with subpixel spline fitting)
+ * 5. Output Generation (clean SVG serialization & real IoU metrics)
  */
 export async function executeTracePipeline(
   sourceCanvas: HTMLCanvasElement,
@@ -163,40 +169,80 @@ export async function executeTracePipeline(
   onProgress?.('analyzing', 20);
   await new Promise((r) => setTimeout(r, 16));
 
+  // Compute preprocessed preview at original resolution for thumbnail & diff
   const preResult = await preprocessImage(sourceCanvas, preOptions);
 
-  // Stage 2: Path Tracing
+  // Stage 2: Path Tracing with Subpixel Supersampling
   onProgress?.('tracing', 45);
   await new Promise((r) => setTimeout(r, 16));
 
-  // Determine ImageTracer parameters from UI options
-  const baseTolerance =
-    traceOptions.quality === 'fast'
-      ? 2.2
-      : traceOptions.quality === 'precise'
-      ? 0.35
-      : 1.0;
+  // Determine upscale factor to eliminate coarse pixel staircasing on small assets
+  const maxDim = Math.max(width, height);
+  const targetDim = 1024;
+  const upscaleFactor =
+    maxDim < targetDim ? Math.min(4, Math.max(1, Math.round(targetDim / maxDim))) : 1;
 
-  // Path optimization slider (0: Exact match -> 1: Cleanest paths)
+  let scaledCanvas = sourceCanvas;
+  if (upscaleFactor > 1) {
+    scaledCanvas = document.createElement('canvas');
+    scaledCanvas.width = width * upscaleFactor;
+    scaledCanvas.height = height * upscaleFactor;
+    const sCtx = scaledCanvas.getContext('2d');
+    if (sCtx) {
+      sCtx.fillStyle = '#FFFFFF';
+      sCtx.fillRect(0, 0, scaledCanvas.width, scaledCanvas.height);
+      sCtx.imageSmoothingEnabled = true;
+      sCtx.imageSmoothingQuality = 'high';
+      sCtx.drawImage(sourceCanvas, 0, 0, scaledCanvas.width, scaledCanvas.height);
+    }
+  }
+
+  // Preprocess scaled image for trace input
+  const traceInput =
+    upscaleFactor > 1
+      ? await preprocessImage(scaledCanvas, preOptions)
+      : preResult;
+
+  // Determine ImageTracer parameters for smooth quadratic bezier curves
   const opt = traceOptions.pathOptimization ?? 0.5;
-  const ltres = +(baseTolerance * (0.6 + opt * 1.0)).toFixed(2);
-  const qtres = +(baseTolerance * (0.6 + opt * 1.0)).toFixed(2);
-  const pathomit = Math.max(1, Math.round(2 + opt * 18));
-  const roundcoords = opt > 0.6 ? 1 : 2;
+  const isPrecise = traceOptions.quality === 'precise';
+  const isFast = traceOptions.quality === 'fast';
+
+  // Linear tolerance: low values prevent snapping curves into straight polygon edges
+  const ltres = isPrecise
+    ? 0.04 + opt * 0.05
+    : isFast
+    ? 0.12 + opt * 0.15
+    : 0.06 + opt * 0.08;
+
+  // Quadratic spline error tolerance for smooth continuous bezier curves
+  const qtres = isPrecise
+    ? 0.45 + opt * 0.35
+    : isFast
+    ? 0.90 + opt * 0.60
+    : 0.65 + opt * 0.45;
+
+  // Path omit threshold
+  const pathomit = isPrecise
+    ? 0
+    : isFast
+    ? Math.max(2, Math.round(2 + opt * 6))
+    : Math.max(1, Math.round(1 + opt * 3));
 
   const tracerConfig: Record<string, any> = {
     corsenabled: false,
-    ltres,
-    qtres,
+    ltres: +ltres.toFixed(3),
+    qtres: +qtres.toFixed(3),
     pathomit,
-    rightangleenhance:
-      traceOptions.preset === 'icon' || traceOptions.preset === 'logo',
-    scale: 1,
-    roundcoords,
+    rightangleenhance: false, // Never force curves into 90-degree orthogonal steps
+    scale: +(1 / upscaleFactor).toFixed(4), // Scaled back to original coordinates with subpixel precision
+    roundcoords: 2, // 2 decimal places for fractional subpixel coordinates
     viewbox: true,
     desc: false,
-    strokewidth: 1,
-    linefilter: opt > 0.4,
+    strokewidth: 0, // No dilation stroke
+    linefilter: true,
+    blurradius: 1,
+    blurdelta: 20,
   };
 
   if (traceOptions.colorMode === 'mono') {
@@ -218,13 +264,12 @@ export async function executeTracePipeline(
   onProgress?.('optimizing', 70);
   await new Promise((r) => setTimeout(r, 16));
 
-  // Trace the preprocessed bitmap in Mono mode, or original bitmap in Color mode
   const inputImageData =
     traceOptions.colorMode === 'mono'
-      ? preResult.imageData
-      : sourceCanvas
+      ? traceInput.imageData
+      : scaledCanvas
           .getContext('2d', { willReadFrequently: true })!
-          .getImageData(0, 0, width, height);
+          .getImageData(0, 0, scaledCanvas.width, scaledCanvas.height);
 
   const rawSvg = (ImageTracer as any).imagedataToSVG(
     inputImageData,
@@ -237,7 +282,7 @@ export async function executeTracePipeline(
 
   const finalSvg = cleanTracedSvg(rawSvg, width, height, traceOptions);
 
-  // Compute honest, genuine quality metrics against preprocessed bitmap
+  // Compute honest, genuine quality metrics against native preprocessed bitmap
   const metrics = await computeQualityMetrics(
     finalSvg,
     preResult.imageData,
