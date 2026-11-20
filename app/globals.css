@@ -1,3 +1,5 @@
+@import "tailwindcss";
+
 :root {
   --paper: #f4f2ec;
   --ink: #0b0b0d;
@@ -13,7 +15,19 @@
 
 body {
   margin: 0;
-  background: var(--paper);
-  color: var(--ink);
-  font-family: Inter, system-ui, -apple-system, sans-serif;
+  background: #ffffff;
+  color: #0b0b0d;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Checkerboard transparency grid */
+.bg-transparency-grid {
+  background-image: linear-gradient(45deg, #e8e6df 25%, transparent 25%),
+                    linear-gradient(-45deg, #e8e6df 25%, transparent 25%),
+                    linear-gradient(45deg, transparent 75%, #e8e6df 75%),
+                    linear-gradient(-45deg, transparent 75%, #e8e6df 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+  background-color: #ffffff;
 }
