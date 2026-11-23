@@ -112,3 +112,52 @@ export function trackCopySvg(params: { characters: number }) {
     console.debug('[Analytics] Failed to track copy_svg', err);
   }
 }
+
+/**
+ * Phase 2 GA4 events
+ */
+export function trackCenterlineSelected(enabled: boolean) {
+  if (typeof window === 'undefined' || typeof window.gtag !== 'function') return;
+  try {
+    window.gtag('event', 'centerline_selected', { enabled, tool: 'linetrace' });
+  } catch (err) {
+    console.debug('[Analytics] Failed to track centerline_selected', err);
+  }
+}
+
+export function trackPatternCreated(params: { spacing: number; density: number }) {
+  if (typeof window === 'undefined' || typeof window.gtag !== 'function') return;
+  try {
+    window.gtag('event', 'pattern_created', { ...params, tool: 'linetrace' });
+  } catch (err) {
+    console.debug('[Analytics] Failed to track pattern_created', err);
+  }
+}
+
+export function trackTemplateDownloaded(template: string) {
+  if (typeof window === 'undefined' || typeof window.gtag !== 'function') return;
+  try {
+    window.gtag('event', 'template_downloaded', { template, tool: 'linetrace' });
+  } catch (err) {
+    console.debug('[Analytics] Failed to track template_downloaded', err);
+  }
+}
+
+export function trackPngDimensionExported(dim: number, bg: string) {
+  if (typeof window === 'undefined' || typeof window.gtag !== 'function') return;
+  try {
+    window.gtag('event', 'png_dimension_exported', { dimension: dim, background: bg, tool: 'linetrace' });
+  } catch (err) {
+    console.debug('[Analytics] Failed to track png_dimension_exported', err);
+  }
+}
+
+export function trackSettingsShared() {
+  if (typeof window === 'undefined' || typeof window.gtag !== 'function') return;
+  try {
+    window.gtag('event', 'settings_shared', { tool: 'linetrace' });
+  } catch (err) {
+    console.debug('[Analytics] Failed to track settings_shared', err);
+  }
+}
+

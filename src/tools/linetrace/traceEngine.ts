@@ -149,6 +149,200 @@ export function cleanTracedSvg(
 }
 
 /**
+ * Centerline thinning algorithm (Zhang-Suen) for signatures, monoline strokes and calligraphy
+ */
+export function traceCenterline(
+  imageData: ImageData,
+  options: TraceOptions,
+  upscaleFactor: number = 1
+): string {
+  const w = imageData.width;
+  const h = imageData.height;
+  const data = imageData.data;
+
+  // 1. Create binary 2D grid: 1 = stroke (dark), 0 = background (light)
+  const grid = new Uint8Array(w * h);
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const a = data[i + 3];
+    const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+    grid[i / 4] = a > 128 && lum < 160 ? 1 : 0;
+  }
+
+  // 2. Zhang-Suen thinning iterations
+  let changed = true;
+  const toDelete = new Uint8Array(w * h);
+
+  while (changed) {
+    changed = false;
+
+    // Sub-iteration 1
+    toDelete.fill(0);
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        const idx = y * w + x;
+        if (grid[idx] !== 1) continue;
+
+        const p2 = grid[(y - 1) * w + x];
+        const p3 = grid[(y - 1) * w + x + 1];
+        const p4 = grid[y * w + x + 1];
+        const p5 = grid[(y + 1) * w + x + 1];
+        const p6 = grid[(y + 1) * w + x];
+        const p7 = grid[(y + 1) * w + x - 1];
+        const p8 = grid[y * w + x - 1];
+        const p9 = grid[(y - 1) * w + x - 1];
+
+        const B = p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9;
+        if (B < 2 || B > 6) continue;
+
+        let A = 0;
+        if (p2 === 0 && p3 === 1) A++;
+        if (p3 === 0 && p4 === 1) A++;
+        if (p4 === 0 && p5 === 1) A++;
+        if (p5 === 0 && p6 === 1) A++;
+        if (p6 === 0 && p7 === 1) A++;
+        if (p7 === 0 && p8 === 1) A++;
+        if (p8 === 0 && p9 === 1) A++;
+        if (p9 === 0 && p2 === 1) A++;
+        if (A !== 1) continue;
+
+        if (p2 * p4 * p6 !== 0) continue;
+        if (p4 * p6 * p8 !== 0) continue;
+
+        toDelete[idx] = 1;
+        changed = true;
+      }
+    }
+    for (let i = 0; i < grid.length; i++) {
+      if (toDelete[i] === 1) grid[i] = 0;
+    }
+
+    // Sub-iteration 2
+    toDelete.fill(0);
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        const idx = y * w + x;
+        if (grid[idx] !== 1) continue;
+
+        const p2 = grid[(y - 1) * w + x];
+        const p3 = grid[(y - 1) * w + x + 1];
+        const p4 = grid[y * w + x + 1];
+        const p5 = grid[(y + 1) * w + x + 1];
+        const p6 = grid[(y + 1) * w + x];
+        const p7 = grid[(y + 1) * w + x - 1];
+        const p8 = grid[y * w + x - 1];
+        const p9 = grid[(y - 1) * w + x - 1];
+
+        const B = p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9;
+        if (B < 2 || B > 6) continue;
+
+        let A = 0;
+        if (p2 === 0 && p3 === 1) A++;
+        if (p3 === 0 && p4 === 1) A++;
+        if (p4 === 0 && p5 === 1) A++;
+        if (p5 === 0 && p6 === 1) A++;
+        if (p6 === 0 && p7 === 1) A++;
+        if (p7 === 0 && p8 === 1) A++;
+        if (p8 === 0 && p9 === 1) A++;
+        if (p9 === 0 && p2 === 1) A++;
+        if (A !== 1) continue;
+
+        if (p2 * p4 * p8 !== 0) continue;
+        if (p2 * p6 * p8 !== 0) continue;
+
+        toDelete[idx] = 1;
+        changed = true;
+      }
+    }
+    for (let i = 0; i < grid.length; i++) {
+      if (toDelete[i] === 1) grid[i] = 0;
+    }
+  }
+
+  // 3. Trace skeleton into SVG path segments
+  const visited = new Uint8Array(w * h);
+  const pathSegments: string[] = [];
+  const scale = 1 / upscaleFactor;
+
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const idx = y * w + x;
+      if (grid[idx] === 1 && !visited[idx]) {
+        let cx = x;
+        let cy = y;
+        const strokePts: [number, number][] = [[cx, cy]];
+        visited[idx] = 1;
+
+        let walking = true;
+        while (walking) {
+          walking = false;
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              if (dx === 0 && dy === 0) continue;
+              const nx = cx + dx;
+              const ny = cy + dy;
+              const nidx = ny * w + nx;
+              if (nx >= 0 && nx < w && ny >= 0 && ny < h && grid[nidx] === 1 && !visited[nidx]) {
+                visited[nidx] = 1;
+                cx = nx;
+                cy = ny;
+                strokePts.push([cx, cy]);
+                walking = true;
+                break;
+              }
+            }
+            if (walking) break;
+          }
+        }
+
+        if (strokePts.length >= 2) {
+          const step = Math.max(1, Math.round(1 + (options.pathOptimization || 0.5) * 2));
+          const simplified: [number, number][] = [];
+          for (let p = 0; p < strokePts.length; p += step) {
+            simplified.push(strokePts[p]);
+          }
+          if (simplified[simplified.length - 1] !== strokePts[strokePts.length - 1]) {
+            simplified.push(strokePts[strokePts.length - 1]);
+          }
+
+          let d = `M ${(simplified[0][0] * scale).toFixed(1)} ${(simplified[0][1] * scale).toFixed(1)}`;
+          for (let p = 1; p < simplified.length; p++) {
+            d += ` L ${(simplified[p][0] * scale).toFixed(1)} ${(simplified[p][1] * scale).toFixed(1)}`;
+          }
+          pathSegments.push(d);
+        }
+      }
+    }
+  }
+
+  const origW = Math.round(w * scale);
+  const origH = Math.round(h * scale);
+  const strokeColor = options.strokeColor || '#111111';
+  const strokeWidth = options.targetStrokeWidth || 2.5;
+
+  const bgRect =
+    options.background === 'white'
+      ? `<rect width="${origW}" height="${origH}" fill="#FFFFFF"/>`
+      : options.background === 'dark'
+      ? `<rect width="${origW}" height="${origH}" fill="#0B0B0D"/>`
+      : '';
+
+  const pathElements = pathSegments
+    .map(
+      (d) =>
+        `<path d="${d}" fill="none" stroke="${strokeColor}" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round"/>`
+    )
+    .join('\n  ');
+
+  return `<svg viewBox="0 0 ${origW} ${origH}" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+  ${bgRect}
+  ${pathElements}
+</svg>`;
+}
+
+/**
  * Runs the complete client-side tracing pipeline:
  * 1. Image Analysis (compute effective threshold & preview)
  * 2. High-Resolution Subpixel Supersampling (for small icons/images)
@@ -271,10 +465,16 @@ export async function executeTracePipeline(
           .getContext('2d', { willReadFrequently: true })!
           .getImageData(0, 0, scaledCanvas.width, scaledCanvas.height);
 
-  const rawSvg = (ImageTracer as any).imagedataToSVG(
-    inputImageData,
-    tracerConfig
-  );
+  let rawSvg: string;
+  if (traceOptions.centerline) {
+    // Phase 2: Centerline tracing mode (skeletonized strokes for signatures & thin line art)
+    rawSvg = traceCenterline(inputImageData, traceOptions, upscaleFactor);
+  } else {
+    rawSvg = (ImageTracer as any).imagedataToSVG(
+      inputImageData,
+      tracerConfig
+    );
+  }
 
   // Stage 4: Output Generation
   onProgress?.('generating', 90);

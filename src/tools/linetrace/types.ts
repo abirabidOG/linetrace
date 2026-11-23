@@ -30,6 +30,7 @@ export interface TraceOptions {
   harmonizeStroke: boolean;
   targetStrokeWidth: number; // in px, e.g. 2
   background: BackgroundMode;
+  centerline?: boolean; // Phase 2: Centerline tracing for signatures/strokes
 }
 
 export interface QualityReadout {

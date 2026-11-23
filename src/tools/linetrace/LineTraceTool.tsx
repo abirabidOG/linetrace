@@ -15,6 +15,10 @@ import {
   FileArchive,
   Shield,
   ArrowRight,
+  Share2,
+  Grid,
+  Layers,
+  Sparkles,
 } from 'lucide-react';
 import type {
   ImageQueueItem,
@@ -35,6 +39,10 @@ import { PRESET_CONFIGS, executeTracePipeline } from './traceEngine';
 import {
   downloadSvgFile,
   downloadPngFile,
+  downloadPngDimension,
+  generatePatternSvg,
+  getPatternCssSnippet,
+  generateTemplateSvg,
   copySvgToClipboard,
   downloadAllAsZip,
 } from './export';
@@ -44,7 +52,13 @@ import {
   trackDownloadPng,
   trackDownloadAllZip,
   trackCopySvg,
+  trackCenterlineSelected,
+  trackPatternCreated,
+  trackTemplateDownloaded,
+  trackPngDimensionExported,
+  trackSettingsShared,
 } from './analytics';
+
 
 const ACCEPTED_TYPES = [
   'image/png',
@@ -67,6 +81,14 @@ export const LineTraceTool: React.FC = () => {
   const [pngScale, setPngScale] = useState<1 | 2 | 4>(2);
   const [isProcessingBatch, setIsProcessingBatch] = useState<boolean>(false);
 
+  // Phase 2 state
+  const [patternDensity, setPatternDensity] = useState<number>(1);
+  const [patternSpacing, setPatternSpacing] = useState<number>(24);
+  const [selectedTemplate, setSelectedTemplate] = useState<'business_card' | 'avatar' | 'sticker_sheet'>('business_card');
+  const [pngExportDim, setPngExportDim] = useState<512 | 1024 | 2000>(1024);
+  const [pngExportBg, setPngExportBg] = useState<'transparent' | 'white'>('transparent');
+  const [activePhase2Tab, setActivePhase2Tab] = useState<'export' | 'pattern' | 'templates'>('export');
+
   // Trace & Preprocessing Options
   const [traceOptions, setTraceOptions] = useState<TraceOptions>({
     preset: 'icon',
@@ -78,6 +100,7 @@ export const LineTraceTool: React.FC = () => {
     harmonizeStroke: false,
     targetStrokeWidth: 2,
     background: 'transparent',
+    centerline: false,
   });
 
   const [preOptions, setPreOptions] = useState<PreprocessingOptions>({
@@ -96,6 +119,75 @@ export const LineTraceTool: React.FC = () => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 2500);
   };
+
+  // Phase 2: Shareable links encoding trace settings in URL hash
+  const handleShareSettings = () => {
+    if (typeof window === 'undefined') return;
+    const payload = {
+      p: traceOptions.preset,
+      q: traceOptions.quality,
+      po: traceOptions.pathOptimization,
+      cm: traceOptions.colorMode,
+      pc: traceOptions.posterizeColors,
+      sc: traceOptions.strokeColor,
+      hs: traceOptions.harmonizeStroke ? 1 : 0,
+      sw: traceOptions.targetStrokeWidth,
+      bg: traceOptions.background,
+      cl: traceOptions.centerline ? 1 : 0,
+      th: preOptions.threshold,
+      at: preOptions.autoThreshold ? 1 : 0,
+      ds: preOptions.despeckle ? 1 : 0,
+      iv: preOptions.invert ? 1 : 0,
+      gs: preOptions.grayscale ? 1 : 0,
+    };
+    const jsonStr = JSON.stringify(payload);
+    const encoded = encodeURIComponent(jsonStr);
+    const shareUrl = `${window.location.origin}${window.location.pathname}#settings=${encoded}`;
+    navigator.clipboard.writeText(shareUrl).then(() => {
+      trackSettingsShared();
+      showToast('Share link copied! Settings encoded in URL');
+    }).catch(() => {
+      showToast('Settings link generated');
+    });
+  };
+
+  // Phase 2: On mount, restore settings from URL hash if present
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const hash = window.location.hash;
+    if (hash.includes('settings=')) {
+      try {
+        const match = hash.match(/settings=([^&]+)/);
+        if (match && match[1]) {
+          const decoded = JSON.parse(decodeURIComponent(match[1]));
+          setTraceOptions((prev) => ({
+            ...prev,
+            preset: decoded.p || prev.preset,
+            quality: decoded.q || prev.quality,
+            pathOptimization: typeof decoded.po === 'number' ? decoded.po : prev.pathOptimization,
+            colorMode: decoded.cm || prev.colorMode,
+            posterizeColors: decoded.pc || prev.posterizeColors,
+            strokeColor: decoded.sc || prev.strokeColor,
+            harmonizeStroke: decoded.hs === 1,
+            targetStrokeWidth: typeof decoded.sw === 'number' ? decoded.sw : prev.targetStrokeWidth,
+            background: decoded.bg || prev.background,
+            centerline: decoded.cl === 1,
+          }));
+          setPreOptions((prev) => ({
+            ...prev,
+            threshold: typeof decoded.th === 'number' ? decoded.th : prev.threshold,
+            autoThreshold: decoded.at === 1,
+            despeckle: decoded.ds === 1,
+            invert: decoded.iv === 1,
+            grayscale: decoded.gs === 1,
+          }));
+          showToast('Settings restored from share link!');
+        }
+      } catch (e) {
+        console.warn('Could not parse share settings from URL', e);
+      }
+    }
+  }, []);
 
   const activeItem = queue[activeIndex] || null;
 
@@ -291,7 +383,8 @@ export const LineTraceTool: React.FC = () => {
   useEffect(() => {
     if (!activeItem || isProcessingBatch) return;
 
-    const signature = `${activeItem.id}-${preOptions.threshold}-${preOptions.autoThreshold}-${preOptions.despeckle}-${preOptions.invert}-${preOptions.grayscale}-${traceOptions.preset}-${traceOptions.quality}-${traceOptions.pathOptimization}-${traceOptions.colorMode}-${traceOptions.posterizeColors}-${traceOptions.strokeColor}-${traceOptions.harmonizeStroke}-${traceOptions.targetStrokeWidth}-${traceOptions.background}`;
+    const signature = `${activeItem.id}-${preOptions.threshold}-${preOptions.autoThreshold}-${preOptions.despeckle}-${preOptions.invert}-${preOptions.grayscale}-${traceOptions.preset}-${traceOptions.quality}-${traceOptions.pathOptimization}-${traceOptions.colorMode}-${traceOptions.posterizeColors}-${traceOptions.strokeColor}-${traceOptions.harmonizeStroke}-${traceOptions.targetStrokeWidth}-${traceOptions.background}-${traceOptions.centerline}`;
+
 
     // If this signature was already completed or is currently running, do nothing
     if (runningSignatureRef.current === signature) {
@@ -988,6 +1081,32 @@ export const LineTraceTool: React.FC = () => {
                   )}
                 </div>
 
+                {/* Centerline Tracing Mode for Signatures & Monoline Art */}
+                <div className="rounded-xl border border-[#E5E1D6] p-3 space-y-1.5 bg-[#FAF9F5]">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="block text-xs font-semibold text-[#0B0B0D]">Centerline Mode</span>
+                      <span className="block text-[11px] text-[#4F4E55]">
+                        Single-stroke skeleton for handwriting &amp; signatures
+                      </span>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={!!traceOptions.centerline}
+                        onChange={(e) => {
+                          const next = e.target.checked;
+                          setTraceOptions((prev) => ({ ...prev, centerline: next }));
+                          trackCenterlineSelected(next);
+                          markAsCustom();
+                        }}
+                        className="sr-only peer"
+                      />
+                      <div className="w-10 h-5 bg-[#C9C7C1] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#5846F6]"></div>
+                    </label>
+                  </div>
+                </div>
+
                 {/* Background selector */}
                 <div className="space-y-1.5">
                   <span className="block text-xs font-medium text-[#0B0B0D]">Preview &amp; PNG Background</span>
@@ -1011,6 +1130,17 @@ export const LineTraceTool: React.FC = () => {
                     ))}
                   </div>
                 </div>
+
+                {/* Shareable Link with Settings Encoded */}
+                <button
+                  type="button"
+                  onClick={handleShareSettings}
+                  className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-[#E5E1D6] bg-white hover:bg-[#F4F2EC] text-[#0B0B0D] py-2.5 text-xs font-bold transition-all shadow-xs"
+                >
+                  <Share2 className="h-3.5 w-3.5 text-[#5846F6]" />
+                  <span>Copy Shareable Settings Link</span>
+                </button>
+
               </div>
             </div>
 
@@ -1306,6 +1436,68 @@ export const LineTraceTool: React.FC = () => {
                       </button>
                     </div>
 
+                    {/* Phase 2: Exact Dimension PNG Export (512, 1024, 2000 px) */}
+                    <div className="rounded-2xl border border-[#E5E1D6] bg-[#FAF9F5] p-3.5 space-y-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <span className="font-mono text-xs uppercase tracking-wider text-[#4F4E55] font-semibold">
+                          Export Exact PNG:
+                        </span>
+                        <div className="flex items-center gap-2">
+                          {/* Dimensions */}
+                          <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-[#E5E1D6]">
+                            {([512, 1024, 2000] as const).map((dim) => (
+                              <button
+                                key={dim}
+                                type="button"
+                                onClick={() => setPngExportDim(dim)}
+                                className={`px-2 py-1 rounded-lg text-xs font-mono font-bold transition-all ${
+                                  pngExportDim === dim
+                                    ? 'bg-[#5846F6] text-white shadow-xs'
+                                    : 'text-[#4F4E55] hover:text-[#0B0B0D]'
+                                }`}
+                              >
+                                {dim}px
+                              </button>
+                            ))}
+                          </div>
+                          {/* Background */}
+                          <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-[#E5E1D6]">
+                            {(['transparent', 'white'] as const).map((bg) => (
+                              <button
+                                key={bg}
+                                type="button"
+                                onClick={() => setPngExportBg(bg)}
+                                className={`px-2 py-1 rounded-lg text-xs font-semibold capitalize transition-all ${
+                                  pngExportBg === bg
+                                    ? 'bg-[#0B0B0D] text-white shadow-xs'
+                                    : 'text-[#4F4E55] hover:text-[#0B0B0D]'
+                                }`}
+                              >
+                                {bg}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await downloadPngDimension(
+                            activeItem.svgOutput!,
+                            activeItem.name,
+                            pngExportDim,
+                            pngExportBg
+                          );
+                          trackPngDimensionExported(pngExportDim, pngExportBg);
+                          showToast(`Exported ${pngExportDim}px PNG (${pngExportBg})!`);
+                        }}
+                        className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-white border border-[#E5E1D6] hover:bg-[#F4F2EC] text-[#0B0B0D] py-2 text-xs font-bold transition-all shadow-xs"
+                      >
+                        <Download className="h-3.5 w-3.5 text-[#5846F6]" />
+                        <span>Download {pngExportDim}px PNG ({pngExportBg} background)</span>
+                      </button>
+                    </div>
+
                     {/* Batch ZIP Download button (if multiple items in queue) */}
                     {queue.length > 1 && (
                       <button
@@ -1327,6 +1519,208 @@ export const LineTraceTool: React.FC = () => {
                   </div>
                 )}
               </div>
+
+              {/* Phase 2: Pattern Maker & Template Companion Cards */}
+              {activeItem?.svgOutput && (
+                <div className="space-y-6">
+                  {/* Phase 2 Navigation Tabs */}
+                  <div className="flex items-center gap-2 border-b border-[#E5E1D6] pb-2">
+                    <button
+                      type="button"
+                      onClick={() => setActivePhase2Tab('pattern')}
+                      className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all ${
+                        activePhase2Tab === 'pattern'
+                          ? 'bg-[#5846F6] text-white shadow-xs'
+                          : 'bg-white border border-[#E5E1D6] text-[#4F4E55] hover:text-[#0B0B0D]'
+                      }`}
+                    >
+                      <Grid className="h-4 w-4" />
+                      <span>Pattern Background Maker</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActivePhase2Tab('templates')}
+                      className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all ${
+                        activePhase2Tab === 'templates'
+                          ? 'bg-[#5846F6] text-white shadow-xs'
+                          : 'bg-white border border-[#E5E1D6] text-[#4F4E55] hover:text-[#0B0B0D]'
+                      }`}
+                    >
+                      <Layers className="h-4 w-4" />
+                      <span>Vector Templates</span>
+                    </button>
+                  </div>
+
+                  {/* Pattern Maker Panel */}
+                  {activePhase2Tab === 'pattern' && (
+                    <div className="rounded-3xl border border-[#E5E1D6] bg-white p-5 sm:p-7 shadow-sm space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="font-bold text-[#0B0B0D] text-base">Pattern Background Maker</h4>
+                          <p className="text-xs text-[#4F4E55]">
+                            Turn this traced vector into a repeating wallpaper pattern.
+                          </p>
+                        </div>
+                        <span className="px-2.5 py-1 rounded-full bg-[#D4FF3A] text-[#0B0B0D] font-mono text-[10px] font-bold uppercase tracking-wider">
+                          Phase 2
+                        </span>
+                      </div>
+
+                      {/* Pattern Controls */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-[#FAF9F5] p-4 rounded-2xl border border-[#E5E1D6]">
+                        {/* Density Slider */}
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="font-medium text-[#0B0B0D]">Density</span>
+                            <span className="font-mono font-bold text-[#5846F6]">{patternDensity.toFixed(1)}x</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0.5"
+                            max="2.0"
+                            step="0.1"
+                            value={patternDensity}
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              setPatternDensity(val);
+                              trackPatternCreated({ density: val, spacing: patternSpacing });
+                            }}
+                            className="w-full accent-[#5846F6] cursor-pointer"
+                          />
+                        </div>
+
+                        {/* Spacing Slider */}
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="font-medium text-[#0B0B0D]">Spacing</span>
+                            <span className="font-mono font-bold text-[#5846F6]">{patternSpacing} px</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0"
+                            max="64"
+                            step="4"
+                            value={patternSpacing}
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              setPatternSpacing(val);
+                              trackPatternCreated({ density: patternDensity, spacing: val });
+                            }}
+                            className="w-full accent-[#5846F6] cursor-pointer"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Live Repeating Pattern Preview Box */}
+                      <div
+                        className="h-48 sm:h-56 w-full rounded-2xl border border-[#E5E1D6] overflow-hidden shadow-inner flex items-center justify-center relative"
+                        dangerouslySetInnerHTML={{
+                          __html: generatePatternSvg(activeItem.svgOutput!, 800, 300, patternDensity, patternSpacing),
+                        }}
+                      />
+
+                      {/* Actions */}
+                      <div className="flex flex-col sm:flex-row items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const patternSvg = generatePatternSvg(activeItem.svgOutput!, 1200, 1200, patternDensity, patternSpacing);
+                            downloadSvgFile(patternSvg, `${activeItem.name.replace(/\.[^/.]+$/, '')}-pattern.svg`);
+                            showToast('Downloaded repeating pattern SVG!');
+                          }}
+                          className="flex-1 w-full inline-flex items-center justify-center gap-2 rounded-xl bg-[#5846F6] hover:bg-[#4735E5] text-white px-4 py-2.5 text-xs sm:text-sm font-bold shadow-xs transition-all"
+                        >
+                          <Download className="h-4 w-4" />
+                          <span>Download Pattern SVG</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const css = getPatternCssSnippet(activeItem.svgOutput!, patternDensity, patternSpacing);
+                            navigator.clipboard.writeText(css).then(() => {
+                              showToast('Copied CSS background snippet!');
+                            });
+                          }}
+                          className="flex-1 w-full inline-flex items-center justify-center gap-2 rounded-xl border border-[#E5E1D6] bg-white hover:bg-[#F4F2EC] text-[#0B0B0D] px-4 py-2.5 text-xs sm:text-sm font-bold transition-all"
+                        >
+                          <Copy className="h-4 w-4" />
+                          <span>Copy CSS Snippet</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Templates Panel */}
+                  {activePhase2Tab === 'templates' && (
+                    <div className="rounded-3xl border border-[#E5E1D6] bg-white p-5 sm:p-7 shadow-sm space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="font-bold text-[#0B0B0D] text-base">Vector Template Mockups</h4>
+                          <p className="text-xs text-[#4F4E55]">
+                            Place your traced vector directly into production-ready mockups.
+                          </p>
+                        </div>
+                        <span className="px-2.5 py-1 rounded-full bg-[#D4FF3A] text-[#0B0B0D] font-mono text-[10px] font-bold uppercase tracking-wider">
+                          Phase 2
+                        </span>
+                      </div>
+
+                      {/* Template Selector */}
+                      <div className="grid grid-cols-3 gap-2 bg-[#FAF9F5] p-1.5 rounded-2xl border border-[#E5E1D6]">
+                        {[
+                          { id: 'business_card', label: 'Business Card', sub: '3.5×2" @ 300DPI' },
+                          { id: 'avatar', label: 'Social Avatar', sub: '600×600 Circle' },
+                          { id: 'sticker_sheet', label: 'Sticker Sheet', sub: '3×4 Die-Cut Grid' },
+                        ].map((t) => (
+                          <button
+                            key={t.id}
+                            type="button"
+                            onClick={() => setSelectedTemplate(t.id as any)}
+                            className={`p-2.5 rounded-xl text-center transition-all ${
+                              selectedTemplate === t.id
+                                ? 'bg-white shadow-xs border border-[#E5E1D6]'
+                                : 'text-[#4F4E55] hover:text-[#0B0B0D]'
+                            }`}
+                          >
+                            <span className="block text-xs font-bold text-[#0B0B0D]">{t.label}</span>
+                            <span className="block text-[10px] font-mono text-[#4F4E55]">{t.sub}</span>
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Template Preview Stage */}
+                      <div
+                        className="w-full rounded-2xl border border-[#E5E1D6] overflow-hidden bg-[#F4F2EC] flex items-center justify-center p-3 select-none"
+                        style={{ minHeight: '260px' }}
+                      >
+                        <div
+                          className="w-full max-h-[380px] flex items-center justify-center [&>svg]:max-w-full [&>svg]:max-h-[360px] [&>svg]:h-auto shadow-sm"
+                          dangerouslySetInnerHTML={{
+                            __html: generateTemplateSvg(activeItem.svgOutput!, selectedTemplate),
+                          }}
+                        />
+                      </div>
+
+                      {/* Download Template SVG */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const tSvg = generateTemplateSvg(activeItem.svgOutput!, selectedTemplate);
+                          const cleanName = activeItem.name.replace(/\.[^/.]+$/, '');
+                          downloadSvgFile(tSvg, `${cleanName}-${selectedTemplate}.svg`);
+                          trackTemplateDownloaded(selectedTemplate);
+                          showToast(`Downloaded ${selectedTemplate.replace('_', ' ')} SVG!`);
+                        }}
+                        className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-[#5846F6] hover:bg-[#4735E5] text-white px-4 py-3 text-xs sm:text-sm font-bold shadow-xs transition-all"
+                      >
+                        <Download className="h-4 w-4" />
+                        <span>Download {selectedTemplate.replace('_', ' ')} Template (SVG)</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
             </div>
           </div>
         </div>
