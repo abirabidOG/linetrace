@@ -1561,9 +1561,6 @@ export const LineTraceTool: React.FC = () => {
                             Turn this traced vector into a repeating wallpaper pattern.
                           </p>
                         </div>
-                        <span className="px-2.5 py-1 rounded-full bg-[#D4FF3A] text-[#0B0B0D] font-mono text-[10px] font-bold uppercase tracking-wider">
-                          Phase 2
-                        </span>
                       </div>
 
                       {/* Pattern Controls */}
@@ -1660,9 +1657,6 @@ export const LineTraceTool: React.FC = () => {
                             Place your traced vector directly into production-ready mockups.
                           </p>
                         </div>
-                        <span className="px-2.5 py-1 rounded-full bg-[#D4FF3A] text-[#0B0B0D] font-mono text-[10px] font-bold uppercase tracking-wider">
-                          Phase 2
-                        </span>
                       </div>
 
                       {/* Template Selector */}
